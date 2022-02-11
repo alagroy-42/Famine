@@ -5,11 +5,30 @@
 %define SYS_WRITE       0x01
 %define SYS_OPEN        0x02
 %define SYS_CLOSE       0x03
+%define SYS_LSEEK       0x08
+%define SYS_MMAP        0x09
+%define SYS_MUNMAP      0x0b
+%define SYS_MSYNC       0x1a
 %define SYS_EXIT        0x3c
+%define SYS_CHDIR       0x50
 %define SYS_GETDENTS64  0xd9
 
 %define O_RDONLY        0
+%define O_RDWR          0o02
 %define O_DIRECTORY     0o0200000
+%define O_WRONLY        0o01
+%define O_CREAT         0o0100
+%define O_TRUNC         0o01000
+
+%define SEEK_END        2
+
+%define PROT_READ       1
+%define PROT_WRITE      2
+
+%define MAP_PRIVATE     0x02
+%define MAP_SHARED      0x01
+
+%define MS_SYNC         0x04
 
 struc       linux_dirent64
     d_ino:          resq    1
@@ -41,6 +60,7 @@ struc       Elf64_Ehdr
 endstruc
 
 %define ELFHDR_SIZE     64
+
 %define ELF_MAGIC       0x464c457f
 %define EI_CLASS        4
 %define EI_DATA         5
@@ -48,5 +68,8 @@ endstruc
 %define ELFDATA2LSB     1
 %define ET_EXEC         2
 %define ET_DYN          3
+%define EI_PAD          9
+
+%define INFECTION_MAGIC 0xcafefeed
 
 %endif

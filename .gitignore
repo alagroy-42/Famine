@@ -42,6 +42,8 @@ famine
 *.su
 *.idb
 *.pdb
+.gdb_history
+peda-session-*
 
 # Kernel Module Compile Results
 *.mod*
@@ -52,6 +54,6 @@ Module.symvers
 Mkfile.old
 dkms.conf
 
-# Debug Files
-.gdb_history
-peda-session-*
+# Test Files
+sample.c
+sample
