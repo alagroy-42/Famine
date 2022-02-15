@@ -100,6 +100,28 @@ struc       Elf64_Shdr
     sh_entsize:     resq    1
 endstruc
 
+%define SHT_PROGBITS    1
+%define SHT_NOBITS      8
+%define SHT_INIT_ARRAY  14
+
 %define INFECTION_MAGIC 0xcafefeed
+
+struc       Infection_stack_frame ; Not really a structure but it will help to clarify the code
+    filename:           resq    1
+    fd:                 resd    1
+    pad_align:          resd    1
+    e_hdr:              resb    ELFHDR_SIZE
+    file_size:          resq    1
+    map:                resq    1
+    text_phdr:          resq    1
+    data_phdr:          resq    1
+    old_entrypoint:     resq    1
+    old_text_size:      resq    1
+    last_text_shdr:     resq    1
+    init_array_shdr:    resq    1
+    bss_shdr:           resq    1
+endstruc
+
+%define STACK_FRAME_SIZE    0xa0
 
 %endif
