@@ -11,6 +11,7 @@
 %define SYS_MREMAP      0x19
 %define SYS_MSYNC       0x1a
 %define SYS_EXIT        0x3c
+%define SYS_FTRUNCATE    0x4d
 %define SYS_CHDIR       0x50
 %define SYS_FCHDIR      0x51
 %define SYS_GETDENTS64  0xd9
@@ -30,7 +31,8 @@
 %define MAP_PRIVATE     0x02
 %define MAP_SHARED      0x01
 %define MAP_ANONYMOUS   0x20
-%define MAP_MAYMOVE     1
+
+%define MREMAP_MAYMOVE     1
 
 %define MS_SYNC         0x04
 
@@ -128,6 +130,7 @@ struc       Infection_stack_frame ; Not really a structure but it will help to c
     payload_base_address:   resq    1
     payload_base_offset:    resq    1
     init_rela_entry_off:    resq    1
+    new_file_size:          resq    1
 endstruc
 
 %define STACK_FRAME_SIZE    0xc0

