@@ -11,6 +11,7 @@ section .text
 ; [rsp]     cwd_fd
 _start:
     push    rbx
+    push    r12
     push    rbp
     mov     rbp, rsp
     sub     rsp, 0x10
@@ -32,6 +33,7 @@ _start:
     add     eax, SYS_CLOSE
     syscall
     leave
+    pop    r12
     pop     rbx
     jmp     _end - 5
 
