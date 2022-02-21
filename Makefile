@@ -6,7 +6,7 @@
 #    By: alagroy- <alagroy-@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2022/02/09 14:49:38 by alagroy-          #+#    #+#              #
-#    Updated: 2022/02/15 12:39:41 by alagroy-         ###   ########.fr        #
+#    Updated: 2022/02/21 16:20:33 by alagroy-         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -22,7 +22,7 @@ INCLUDES = ./srcs/defines.s
 all : $(OBJDIR) $(NAME)
 
 $(NAME): $(OBJS)
-	ld -o $@ $<
+	ld --omagic -o $@ $<
 	printf "\n\033[0;32m[$(NAME)] Linking [OK]\n\033[0;0m"
 
 $(OBJDIR)%.o: $(SRCDIR)%.s $(INCLUDES) Makefile 

