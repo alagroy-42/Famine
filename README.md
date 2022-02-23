@@ -6,31 +6,32 @@ It aims to infect a 64-bit ELF file with self-replicating code so that launching
 
 ### Disclaimer
 
-This project is purely pedagogicaland is not made to any illegal or irresponsible use.
+This project is purely pedagogical and is not made to any illegal or irresponsible use.
 
 ## Infection
 
 Once infectable binaries (ELF 64-bit not infected yet) are found in the corresponding directories, the virus will check the segment padding to choose the best infection strategy.
 
 ### Constraints
-While starting this project, I wanted an actually deployable working strategy even though this is not specified in the subject. Hijacking a PT_NOTE to add a PT_LOAD was not enough for me. I don't want my virus to be spot by a simple `readelf` which means that:
-- the number of segments and their size should remain the same after the infection (An additionnal segment or any RWX segment would be very easily spotable)
+
+While starting this project, I wanted a  deployable working strategy even though this is not specified in the subject. Hijacking a PT_NOTE to add a PT_LOAD was not enough for me. I don't want my virus to be spot by a simple `readelf` which means that:
+- the number of segments and their permissions should remain the same after the infection (An additionnal segment or any RWX segment would be very easily spotable)
 - sections addresses and offset should remain consistent
-- entrypoint shouldn't change (Even with a very stealthy infection, an entrypoint placed at the end of the .text segment would be too easy to spot)
+- entrypoint shouldn't change (Even with a very stealthy infection, an entrypoint placed at the end of the `.text` segment would be too easy to spot)
 
-### Strategy 1
+### Strategy 1 (Text segment padding infection)
 
-The optimal strategy that I prefer is the .text padding infection. Since segments must be page align and ELF specification notify that file offsets and addresses must be consistent, memory padding also happens in the file so we have a zero-filled area between the end of the code and the next page aligned offset (from 0 to 0x1000 bytes).
+The optimal strategy that I prefer is the `.text` padding infection. Since segments must be page align and ELF specification notify that file offsets and addresses must be consistent, memory padding also happens in the file so we have a zero-filled area between the end of the code and the next page aligned offset (from 0 to 0x1000 bytes).
 This padding area is the perfect place to place our parasite, it is mapped on an executable segment of memory.
 Infection will consist in the following steps :
 - copy the payload in the padding area.
-- increase the .text segment size so that our payload gets mapped into memory at runtime
-- increase the last section of the segment (usually .fini) so that our payload fit in a section to avoid any suspicion.
+- increase the `.text` segment size so that our payload gets mapped into memory at runtime
+- increase the last section of the segment (usually `.fini`) so that our payload fit in a section to avoid any suspicion.
 - hijack execution to execute the payload (this method will be identical to both strategies and described later)
 
 There is a slight downside to this method, it doesn't work if the segment padding area is not large enough for the payload to fit in. That's why we have our second strategy.
 
-### Strategy 2
+### Strategy 2 (Data segment infection)
 
 This strategy will be chosen if we din't have enough room in the text segment padding to insert the payload. It consists in inserting the payload at the end of the data segment which adds a layer of complexity to the task. The last section of the data segment is usually the BSS, a SH_NOBITS section which is not present in the file but zero-filled in memory. Infecting the data segment right after its last bit would result in the loss of our first instructions that would be overridden by the bss zero-filled memory area. We have to first make sure that this doesn't happen but without altering the execution of the host program.
 To do so, we will :
@@ -40,7 +41,7 @@ To do so, we will :
 
 Now that we have done all that, the bss issue is solved and we can put our payload after the data segment, but to get it executed without modifying the permissions of the data segment, we also have to insert a chunk of code in the text segment so that our payload will get execution permission at runtime.
 To do so, we will now :
-- copy the payload at the end of the .data section.
+- copy the payload at the end of the `.data` segment.
 - increase the corresponding segment and section (for the same purpose/reasons as above).
 - shift everything that follows (symbol/string table etc..) to keep the data in the file.
 - change the offsets and addresses of those to keep it coherent. (those last two steps will actually happen before the bss extension in the file to avoid any loss of data but it makes more sense to put it there)
@@ -52,7 +53,7 @@ Even though I think that with the little amount of functions famine has, strateg
 
 ## Execution hijacking
 
-To get the payload executed without changing the entrypoint, we will go for the constructor hijacking method. In every C/C++ program, a lot happens before the `main` function execution. The part which interests us is the `_init` function which is called at the beginning of `__libc_start_main`. This function will call every function contained in the function pointer array present in the `.init_array` section. Even for really simplist program (cf `sample.c`), there is at least one function in this array, the `frame_dummy` function. By overriding this pointer with the address of our code, we will be able to launch our function even before `main`. We will then jump on the original function that was in the array to preserve the execution sanity. This method is not spottable by a simple readelf but it is not that stealthy because any AV would spot that constructors should be in the `.text` section, which will not be our case (the payload will probably be inside the `.fini` section).
+To get the payload executed without changing the entrypoint, we will go for the constructor hijacking method. In every C/C++ program, a lot happens before the `main` function execution. The part which interests us is the `__libc_csu_init` function which is called at the beginning of `__libc_start_main`. This function will call every function contained in the function pointer array present in the `.init_array` section. Even for really simplist program (cf `sample.c`), there is at least one function in this array, the `frame_dummy` function. By overriding this pointer with the address of our code, we will be able to launch our function even before `main`. We will then jump on the original function that was in the array to preserve the execution sanity. This method is not spottable by a simple readelf but it is not that stealthy because any AV would spot that constructors should be in the `.text` section, which will not be our case (the payload will probably be inside the `.fini` section).
 
 ## Conclusion
 
