@@ -111,7 +111,8 @@ endstruc
 %define SHT_NOBITS      8
 %define SHT_RELA        4
 %define SHT_INIT_ARRAY  14
-%define SHT_FINI_ARRAY  15
+
+%define SHF_TLS         (1 << 10)
 
 %define INFECTION_MAGIC 0xcafefeed
 

